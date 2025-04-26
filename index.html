@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>函数图像可视化</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.8.0/math.min.js"></script>
+  <style>
+    body {
+      background-color: white;
+      font-family: sans-serif;
+      padding: 20px;
+    }
+    canvas {
+      border: 1px solid #000;
+      cursor: crosshair;
+    }
+    #controls {
+      margin-bottom: 10px;
+    }
+    .function-input {
+      width: 300px;
+      margin: 5px 0;
+    }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <button id="addBtn">添加函数</button>
+    <label><input type="radio" name="angleMode" value="radian" checked> 弧度制</label>
+    <label><input type="radio" name="angleMode" value="degree"> 角度制</label>
+  </div>
+  <div id="functions-container"></div>
+  <canvas id="graphCanvas" width="1000" height="600"></canvas>
+
+  <script>
+    const canvas = document.getElementById('graphCanvas');
+    const ctx = canvas.getContext('2d');
+    const colors = ['blue', 'green', 'red', 'purple', 'orange'];
+    const functions = [];
+    let angleMode = 'radian';
+    let scale = 50;
+    let origin = { x: canvas.width / 2, y: canvas.height / 2 };
+    let mouseX = 0;
+    let showY = false;
+    let showDerivative = false;
+
+    document.getElementsByName('angleMode').forEach(radio => {
+      radio.onchange = () => {
+        angleMode = document.querySelector('input[name="angleMode"]:checked').value;
+        draw();
+      };
+    });
+
+    document.getElementById('addBtn').onclick = addFunctionInput;
+
+    function addFunctionInput() {
+      if (functions.length >= 5) return alert('最多支持5个函数');
+      const input = document.createElement('input');
+      input.className = "function-input";
+      input.placeholder = '输入函数 f(x) 如 sin(x) + x^2';
+      input.addEventListener('input', draw);
+      document.getElementById('functions-container').appendChild(input);
+      functions.push(input);
+      draw();
+    }
+
+    function toCanvasX(x) {
+      return origin.x + x * scale;
+    }
+
+    function toCanvasY(y) {
+      return origin.y - y * scale;
+    }
+
+    function fromCanvasX(x) {
+      return (x - origin.x) / scale;
+    }
+
+    function getFunctionY(expr, x) {
+      try {
+        const scope = { x: angleMode === 'degree' ? x * (Math.PI / 180) : x };
+        return math.evaluate(expr, scope);
+      } catch {
+        return null;
+      }
+    }
+
+    function derivative(expr, x) {
+      const dx = 1e-5;
+      const y1 = getFunctionY(expr, x - dx);
+      const y2 = getFunctionY(expr, x + dx);
+      if (y1 != null && y2 != null) return (y2 - y1) / (2 * dx);
+      return null;
+    }
+
+    function drawAxes() {
+      ctx.strokeStyle = '#000';
+      ctx.beginPath();
+      ctx.moveTo(0, origin.y);
+      ctx.lineTo(canvas.width, origin.y);
+      ctx.moveTo(origin.x, 0);
+      ctx.lineTo(origin.x, canvas.height);
+      ctx.stroke();
+    }
+
+    function drawFunctions() {
+      functions.forEach((input, idx) => {
+        const expr = input.value;
+        if (!expr) return;
+
+        ctx.beginPath();
+        ctx.strokeStyle = colors[idx % colors.length];
+        let first = true;
+        for (let px = 0; px < canvas.width; px++) {
+          const x = fromCanvasX(px);
+          const y = getFunctionY(expr, x);
+          if (y == null || isNaN(y) || !isFinite(y)) {
+            first = true;
+            continue;
+          }
+          const py = toCanvasY(y);
+          if (first) {
+            ctx.moveTo(px, py);
+            first = false;
+          } else {
+            ctx.lineTo(px, py);
+          }
+        }
+        ctx.stroke();
+      });
+    }
+
+    function drawOverlay() {
+      if (!showY && !showDerivative) return;
+      const xVal = fromCanvasX(mouseX);
+      const yVals = functions.map(input => {
+        const expr = input.value;
+        return showDerivative ? derivative(expr, xVal) : getFunctionY(expr, xVal);
+      });
+
+      ctx.beginPath();
+      ctx.strokeStyle = '#aaa';
+      ctx.moveTo(mouseX, 0);
+      ctx.lineTo(mouseX, canvas.height);
+      ctx.stroke();
+
+      yVals.forEach((y, idx) => {
+        if (y == null || isNaN(y)) return;
+        const py = toCanvasY(y);
+        ctx.beginPath();
+        ctx.fillStyle = colors[idx % colors.length];
+        ctx.arc(mouseX, py, 4, 0, 2 * Math.PI);
+        ctx.fill();
+        ctx.fillText(`f${idx+1}(${xVal.toFixed(2)})=${y.toFixed(2)}`, mouseX + 5, py - 10);
+      });
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawAxes();
+      drawFunctions();
+      drawOverlay();
+    }
+
+    canvas.addEventListener('mousemove', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      mouseX = e.clientX - rect.left;
+      draw();
+    });
+
+    canvas.addEventListener('mousedown', (e) => {
+      if (e.buttons === 1) showY = true;
+      if (e.buttons === 3) showDerivative = true;
+      draw();
+    });
+
+    canvas.addEventListener('mouseup', () => {
+      showY = false;
+      showDerivative = false;
+      draw();
+    });
+
+    canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const zoom = e.deltaY < 0 ? 1.1 : 0.9;
+      const x = e.offsetX;
+      const y = e.offsetY;
+      const xVal = fromCanvasX(x);
+      const yVal = (origin.y - y) / scale;
+
+      scale *= zoom;
+      origin.x = x - xVal * scale;
+      origin.y = y + yVal * scale;
+      draw();
+    });
+
+    // 初始化时添加一个函数输入框
+    window.onload = addFunctionInput;
+  </script>
+</body>
+</html>
